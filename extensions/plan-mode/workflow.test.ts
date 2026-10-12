@@ -257,36 +257,34 @@ test("only /plan is registered; defaults and nested calls are gated", async () =
   expect(await h.emit("tool_call", { toolName: "read", input: {} })).toBeUndefined();
   expect(h.messages[0].content).toBe("Design a feature");
 });
-test("/plan argument autocomplete offers settings without matching prompt text", async () => {
+test("/plan argument autocomplete offers settings and exit commands", async () => {
   const h = await setup();
   const complete = h.commands.get("plan").getArgumentCompletions;
-  for (const prefix of ["", "s", "set", "Settings"]) {
+  for (const prefix of ["s", "set", "Settings"]) {
     expect((await complete(prefix))?.map(({ value }: { value: string }) => value)).toEqual([
       "settings",
     ]);
   }
+  expect((await complete(""))?.map(({ value }: { value: string }) => value)).toEqual([
+    "settings",
+    "exit",
+  ]);
   for (const prefix of ["Design a feature", "settings extra"]) {
     expect(await complete(prefix)).toBeNull();
   }
   expect([...h.commands.keys()]).toEqual(["plan"]);
 });
 
-test("/plan autocomplete offers exit only while Plan Mode is active", async () => {
+test("/plan exit autocomplete remains available before, during, and after Plan Mode", async () => {
   const h = await setup();
-  const completeArguments = h.commands.get("plan").getArgumentCompletions;
-  expect(await completeArguments("e")).toBeNull();
+  const complete = h.commands.get("plan").getArgumentCompletions;
+  expect((await complete("e"))?.map(({ value }: { value: string }) => value)).toEqual(["exit"]);
 
   await h.command("Research");
-  expect((await completeArguments("e"))?.map(({ value }: { value: string }) => value)).toEqual([
-    "exit",
-  ]);
-  expect((await completeArguments(""))?.map(({ value }: { value: string }) => value)).toEqual([
-    "settings",
-    "exit",
-  ]);
+  expect((await complete("e"))?.map(({ value }: { value: string }) => value)).toEqual(["exit"]);
 
   await h.command("exit");
-  expect(await completeArguments("e")).toBeNull();
+  expect((await complete("e"))?.map(({ value }: { value: string }) => value)).toEqual(["exit"]);
 });
 
 test("/plan exit restores original tools and thinking without implementing", async () => {
