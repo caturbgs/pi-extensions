@@ -1,34 +1,34 @@
 {
-	"name": "@caturbgs/pi-extensions",
-	"version": "0.1.0",
-	"private": true,
-	"type": "module",
-	"description": "Custom Pi extensions: Plan Mode, Notify, and Titlebar Spinner.",
-	"keywords": [
-		"pi-package"
-	],
-	"pi": {
-		"extensions": [
-			"./extensions/plan-mode/index.ts",
-			"./extensions/notify.ts",
-			"./extensions/titlebar-spinner.ts"
-		]
-	},
-	"scripts": {
-		"test": "bun run test:plan-mode && bun test extensions/notify.test.ts extensions/titlebar-spinner.test.ts",
-		"test:plan-mode": "cd extensions/plan-mode && bun test safety.test.ts protocol.test.ts storage.test.ts settings.test.ts workflow.test.ts && bun test ui.test.ts",
-		"check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p extensions/plan-mode/tsconfig.json",
-		"format": "prettier --write 'extensions/**/*.ts' 'extensions/**/*.json' 'extensions/**/*.md' README.md package.json tsconfig.json",
-		"format:check": "prettier --check 'extensions/**/*.ts' 'extensions/**/*.json' 'extensions/**/*.md' README.md package.json tsconfig.json"
-	},
-	"peerDependencies": {
-		"@earendil-works/pi-agent-core": "*",
-		"@earendil-works/pi-coding-agent": "*",
-		"@earendil-works/pi-tui": "*"
-	},
-	"devDependencies": {
-		"@types/node": "^24.0.0",
-		"prettier": "^3.6.0",
-		"typescript": "^5.9.0"
-	}
+  "name": "@caturbgs/pi-extensions",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Custom Pi extensions: Plan Mode, Notify, and Titlebar Spinner.",
+  "keywords": [
+    "pi-package"
+  ],
+  "type": "module",
+  "scripts": {
+    "test": "bun run test:plan-mode && bun test extensions/notify.test.ts extensions/titlebar-spinner.test.ts",
+    "test:plan-mode": "cd extensions/plan-mode && bun test safety.test.ts protocol.test.ts storage.test.ts settings.test.ts workflow.test.ts && bun test ui.test.ts",
+    "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p extensions/plan-mode/tsconfig.json",
+    "format": "oxfmt --write 'extensions/**/*.ts' 'extensions/**/*.json' 'extensions/**/*.md' README.md package.json tsconfig.json .oxfmtrc.json",
+    "format:check": "oxfmt --check 'extensions/**/*.ts' 'extensions/**/*.json' 'extensions/**/*.md' README.md package.json tsconfig.json .oxfmtrc.json"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "oxfmt": "^0.72.0",
+    "typescript": "^5.9.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/plan-mode/index.ts",
+      "./extensions/notify.ts",
+      "./extensions/titlebar-spinner.ts"
+    ]
+  }
 }
