@@ -329,15 +329,11 @@ export function createPlanMode(pi: ExtensionAPI, directory: string, settingsFile
           label: "settings",
           description: "Configure Plan Mode tools, bash whitelist, and models",
         },
-        ...(active()
-          ? [
-              {
-                value: "exit",
-                label: "exit",
-                description: "Leave Plan Mode and restore your original tools and thinking level",
-              },
-            ]
-          : []),
+        {
+          value: "exit",
+          label: "exit",
+          description: "Leave Plan Mode and restore your original tools and thinking level",
+        },
       ];
       const matches = options.filter(({ value }) => value.startsWith(prefix.toLowerCase()));
       return matches.length ? matches : null;
