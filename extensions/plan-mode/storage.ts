@@ -1,6 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { PlanState } from "./types.ts";
 
 export async function atomicWrite(file: string, content: string): Promise<void> {
@@ -46,6 +46,24 @@ export class PlanBackup {
   async flush(): Promise<void> {
     await this.pending;
   }
+
+  clearSession(sessionId: string, expectedPlan: string, workingDirectory: string): Promise<void> {
+    const cleanup = this.pending.then(async () => {
+      const sessionDir = join(this.directory, "state", sessionId.replace(/[^a-zA-Z0-9_-]/g, "_"));
+      await rm(sessionDir, { recursive: true, force: true });
+
+      const latestPlan = join(this.directory, "PLAN.md");
+      if (resolve(latestPlan) === resolve(workingDirectory, "PLAN.md")) return;
+      try {
+        if ((await readFile(latestPlan, "utf8")) === `${expectedPlan}\n`) await unlink(latestPlan);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    });
+    this.pending = cleanup.catch(() => {});
+    return cleanup;
+  }
+
   async recover(sessionId: string, cwd: string): Promise<PlanState | undefined> {
     const file = join(
       this.directory,

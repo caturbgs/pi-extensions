@@ -1,5 +1,5 @@
 import { afterEach, expect, mock, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -131,7 +131,11 @@ function harness(dir: string, branch: any[] = []) {
       });
       // Simulate a NEW runtime. Old pi/ctx would throw if used after this point.
       const destination = harness(join(dir, "fresh"), newBranch);
-      createPlanMode(destination.pi as ExtensionAPI, dir, join(dir, "settings.json"));
+      createPlanMode(
+        destination.pi as ExtensionAPI,
+        join(dir, "extension"),
+        join(dir, "settings.json"),
+      );
       await destination.emit("session_start", { reason: "new" });
       await options.withSession({
         ...destination.ctx,
@@ -194,7 +198,7 @@ async function setup(settings?: Partial<PlanSettings>, branch?: any[]) {
     JSON.stringify({ ...defaultSettings(), ...settings }),
   );
   const h = harness(dir, branch);
-  createPlanMode(h.pi as ExtensionAPI, dir, join(dir, "settings.json"));
+  createPlanMode(h.pi as ExtensionAPI, join(dir, "extension"), join(dir, "settings.json"));
   await h.emit("session_start", { reason: "startup" });
   return h;
 }
@@ -207,6 +211,29 @@ async function complete(h: ReturnType<typeof harness>) {
     },
   });
 }
+
+async function pathExists(file: string): Promise<boolean> {
+  try {
+    await access(file);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+async function expectPlanBackup(dir: string, expected: boolean): Promise<void> {
+  const extensionDir = join(dir, "extension");
+  for (const file of [
+    join(extensionDir, "PLAN.md"),
+    join(extensionDir, "state", "session-one", "PLAN.md"),
+    join(extensionDir, "state", "session-one", "recovery.json"),
+  ]) {
+    const actual = await pathExists(file);
+    if (actual !== expected)
+      throw new Error(`Backup ${file} exists: ${actual}; expected: ${expected}`);
+  }
+}
+
 test("only /plan is registered; defaults and nested calls are gated", async () => {
   const h = await setup();
   await h.command("Design a feature");
@@ -244,6 +271,62 @@ test("/plan argument autocomplete offers settings without matching prompt text",
   expect([...h.commands.keys()]).toEqual(["plan"]);
 });
 
+test("/plan autocomplete offers exit only while Plan Mode is active", async () => {
+  const h = await setup();
+  const completeArguments = h.commands.get("plan").getArgumentCompletions;
+  expect(await completeArguments("e")).toBeNull();
+
+  await h.command("Research");
+  expect((await completeArguments("e"))?.map(({ value }: { value: string }) => value)).toEqual([
+    "exit",
+  ]);
+  expect((await completeArguments(""))?.map(({ value }: { value: string }) => value)).toEqual([
+    "settings",
+    "exit",
+  ]);
+
+  await h.command("exit");
+  expect(await completeArguments("e")).toBeNull();
+});
+
+test("/plan exit restores original tools and thinking without implementing", async () => {
+  const h = await setup({ planningThinking: "low" });
+  await h.command("Research");
+  await complete(h);
+  expect(h.thinking).toBe("low");
+
+  await h.command("exit");
+
+  expect(h.tools).toEqual(["read", "bash", "write", "edit", "todo", "ask_user_question"]);
+  expect(h.thinking).toBe("high");
+  expect(h.branch.at(-1).data).toMatchObject({ phase: "off", plan });
+  expect(h.messages).toHaveLength(1);
+  expect(h.notifications.at(-1)).toContain("Plan mode exited");
+  await h.emit("session_shutdown", { reason: "test" });
+  await expectPlanBackup(h.ctx.cwd, true);
+});
+test("/plan exit during planning restores original tools and thinking", async () => {
+  const h = await setup({ planningThinking: "low" });
+  await h.command("Research");
+  expect(h.thinking).toBe("low");
+
+  await h.command("exit");
+
+  expect(h.tools).toEqual(["read", "bash", "write", "edit", "todo", "ask_user_question"]);
+  expect(h.thinking).toBe("high");
+  expect(h.branch.at(-1).data).toMatchObject({ phase: "off", plan: "" });
+  expect(h.messages).toHaveLength(1);
+});
+
+test("/plan exit while inactive does not start planning", async () => {
+  const h = await setup();
+  await h.command("exit");
+
+  expect(h.messages).toHaveLength(0);
+  expect(h.branch).toHaveLength(0);
+  expect(h.notifications.at(-1)).toBe("Plan mode is not active.");
+});
+
 test("enabled bash remains whitelisted", async () => {
   const h = await setup({ tools: { bash: true } });
   await h.command("Research");
@@ -269,6 +352,7 @@ test("thinking defaults inherit; planning override is restored for implementatio
   expect(h.tools).toContain("write");
   expect(h.messages.at(-1).content).toContain(plan);
   expect(await h.emit("tool_call", { toolName: "write", input: {} })).toBeUndefined();
+  await expectPlanBackup(h.ctx.cwd, false);
 });
 test("approval is dispatched after settlement, never on aborted responses", async () => {
   const h = await setup();
@@ -302,6 +386,7 @@ test("compact finishes before model/thinking/implementation; exact plan is re-in
   expect(h.order.indexOf("compact")).toBeLessThan(h.order.indexOf("model"));
   expect(h.thinking).toBe("xhigh");
   expect(h.messages.at(-1).content).toContain(plan);
+  await expectPlanBackup(h.ctx.cwd, false);
 });
 test("failed compaction or authentication never starts implementation", async () => {
   const h = await setup();
@@ -310,6 +395,7 @@ test("failed compaction or authentication never starts implementation", async ()
   h.compactFails = true;
   choices = ["compact"];
   await h.command();
+  await expectPlanBackup(h.ctx.cwd, true);
   expect(h.messages).toHaveLength(1);
   expect(h.tools).not.toContain("write");
   h.compactFails = false;
@@ -319,6 +405,7 @@ test("failed compaction or authentication never starts implementation", async ()
   expect(h.messages).toHaveLength(1);
   expect(h.tools).not.toContain("write");
   expect(h.notifications.some((text) => text.includes("Authentication"))).toBe(true);
+  await expectPlanBackup(h.ctx.cwd, true);
 });
 test("revision returns to normal editor without prompting until user submits", async () => {
   const h = await setup();
@@ -342,7 +429,12 @@ test("export preserves planning state and writes exact markdown", async () => {
   await h.command();
   expect(await readFile(join(h.ctx.cwd, "PLAN.md"), "utf8")).toBe(`${plan}\n`);
   expect(h.tools).not.toContain("write");
-  expect(h.messages).toHaveLength(1);
+  choices = ["here"];
+  await h.command();
+  expect(await readFile(join(h.ctx.cwd, "PLAN.md"), "utf8")).toBe(`${plan}\n`);
+  await expectPlanBackup(h.ctx.cwd, false);
+  expect(h.messages).toHaveLength(2);
+  expect(h.messages.at(-1).content).toContain(plan);
 });
 test("fresh implementation uses a new runtime and leaves source plan ready", async () => {
   const h = await setup({ implementationThinking: "xhigh" });
@@ -354,6 +446,7 @@ test("fresh implementation uses a new runtime and leaves source plan ready", asy
   const destination = harnesses.at(-1)!;
   expect(destination.thinking).toBe("xhigh");
   expect(destination.messages.at(-1).content).toContain(plan);
+  await expectPlanBackup(h.ctx.cwd, false);
   expect(destination.tools).toContain("write");
   expect(h.branch.at(-1).data.phase).toBe("ready");
 });
@@ -393,7 +486,11 @@ test("disk recovery requires a new complete assistant proposal before approval",
   await complete(h);
   await h.emit("session_shutdown", { reason: "reload" });
   const restored = harness(h.ctx.cwd);
-  createPlanMode(restored.pi as ExtensionAPI, h.ctx.cwd, join(h.ctx.cwd, "settings.json"));
+  createPlanMode(
+    restored.pi as ExtensionAPI,
+    join(h.ctx.cwd, "extension"),
+    join(h.ctx.cwd, "settings.json"),
+  );
   await restored.emit("session_start", { reason: "reload" });
   expect(restored.branch.at(-1).data.phase).toBe("revising");
   expect(restored.tools).not.toContain("write");

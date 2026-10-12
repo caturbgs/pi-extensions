@@ -7,8 +7,9 @@ This extension provides a plan-first workflow with explicit approval. It uses th
 - `/plan [prompt]` starts Plan Mode and sends the prompt to the agent.
 - `/plan` without a prompt starts Plan Mode, or opens approval for a ready plan.
 - `/plan settings` opens the five configuration options.
+- `/plan exit` exits Plan Mode, restores the tools and thinking level from before planning, and keeps the plan in the session.
 
-There are no other subcommands or keyboard shortcuts. Plan Mode remains active until you approve implementation. Escape closes an approval dialog without approval.
+Plan Mode remains active until you approve implementation or run `/plan exit`. Escape closes an approval dialog without approval. The extension exposes no other nested commands or keyboard shortcuts.
 
 ## Workflow
 
@@ -33,13 +34,13 @@ The assistant writes the complete plan in the active conversation. The extension
 
 ### Approval options
 
-| Option                                 | Result                                                                                                                                           |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Implement Here**                     | Restore the tools from before Plan Mode. Apply the implementation model and thinking level. Start in the current session.                        |
-| **Implement Here and Compact Context** | Complete compaction first. Insert the exact approved plan again, apply implementation settings, and start implementation.                        |
-| **Implement Fresh**                    | Create a parent-linked session. Apply implementation settings in the new runtime. Send the full approved plan without the research conversation. |
-| **Revise the Plan**                    | Return to the normal pi editor. Submit changes to request a complete replacement plan. All pi slash commands remain available.                   |
-| **Export the Plan**                    | Write the exact plan to `PLAN.md` in the current directory. Ask before replacement. Keep Plan Mode active.                                       |
+| Option                                 | Result                                                                                                                                                                                                      |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Implement Here**                     | Restore the tools from before Plan Mode. Apply the implementation model and thinking level. Start in the current session. Remove internal backups after the implementation prompt is recorded.              |
+| **Implement Here and Compact Context** | Complete compaction first. Insert the exact approved plan again, apply implementation settings, and start implementation. Remove internal backups after the prompt is recorded.                             |
+| **Implement Fresh**                    | Create a parent-linked session. Apply implementation settings in the new runtime. Send the full approved plan without the research conversation. Remove the source backup after the new prompt is recorded. |
+| **Revise the Plan**                    | Return to the normal pi editor. Submit changes to request a complete replacement plan. All pi slash commands remain available.                                                                              |
+| **Export the Plan**                    | Write the exact plan to `PLAN.md` in the current directory. Ask before replacement. Keep Plan Mode active.                                                                                                  |
 
 If compaction fails or you cancel it, implementation does not start. If the selected model is unavailable or lacks authentication, implementation does not start. Use `/plan` to open approval again.
 
@@ -89,9 +90,11 @@ plan-mode/
 
 These generated files are gitignored. Backups contain plan text and can contain sensitive project details. Protect the extension directory accordingly. Background writes are best effort. A process crash before a write completes can leave the previous backup.
 
+After an implementation prompt is recorded in the target session, the extension removes that session's `PLAN.md` and `recovery.json`. It also removes the extension-level `PLAN.md` when it matches the approved plan, unless that file is also the current-directory export. If authentication or compaction fails first, the internal backup remains for another approval attempt. `/plan exit` keeps the plan and its backup because it does not approve implementation.
+
 Session recovery uses the active branch, not abandoned branches. An intact session restores its proposed plan and approval state. Disk recovery only applies when session state is missing and the session ID and working directory match. A recovered disk plan requires the agent to publish a complete plan in the conversation before approval. The extension never substitutes `cat PLAN.md` for an assistant response.
 
-No startup action resumes implementation automatically. Fresh-session approval leaves the source plan available in its original session.
+No startup action resumes implementation automatically. Fresh-session approval leaves the source plan in its original session. The source backup is removed after the fresh session records the implementation prompt.
 
 ## Installation
 

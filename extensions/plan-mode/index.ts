@@ -79,7 +79,7 @@ export function createPlanMode(pi: ExtensionAPI, directory: string, settingsFile
         ? [
             state!.phase === "ready"
               ? "Plan ready • /plan opens approval • nothing is implemented until approval"
-              : "Plan mode • research → questions → existing todo → proposed plan • /plan settings",
+              : "Plan mode • research → questions → existing todo → proposed plan • /plan settings • /plan exit",
           ]
         : undefined,
     );
@@ -125,6 +125,19 @@ export function createPlanMode(pi: ExtensionAPI, directory: string, settingsFile
     applyPlanning();
     persist(ctx);
   }
+  function exitPlan(ctx: ExtensionContext): void {
+    if (!active()) {
+      ctx.ui.notify("Plan mode is not active.", "info");
+      return;
+    }
+    state!.phase = "off";
+    automaticallyPresent = false;
+    pi.setActiveTools(state!.originalTools);
+    pi.setThinkingLevel(state!.originalThinking);
+    persist(ctx);
+    ctx.ui.notify("Plan mode exited. The proposed plan remains in this session.", "info");
+  }
+
   function implementationRequest(): ImplementationRequest {
     return {
       plan: state!.plan,
@@ -186,6 +199,7 @@ export function createPlanMode(pi: ExtensionAPI, directory: string, settingsFile
     presenting = true;
     const expectedSession = ctx.sessionManager.getSessionId();
     const expectedPlan = state.plan;
+    const expectedCwd = ctx.cwd;
     try {
       for (;;) {
         const action = await chooseAction(ctx);
@@ -243,8 +257,14 @@ export function createPlanMode(pi: ExtensionAPI, directory: string, settingsFile
                     entry.data === true,
                 );
               try {
-                if (ready) await fresh.sendUserMessage(prompt);
-                else
+                if (ready) {
+                  await fresh.sendUserMessage(prompt);
+                  try {
+                    await backup.clearSession(expectedSession, expectedPlan, expectedCwd);
+                  } catch (error) {
+                    notifyError(fresh, error);
+                  }
+                } else
                   fresh.ui.notify(
                     "Implementation settings could not be applied. The source session and its proposed plan are unchanged.",
                     "error",
@@ -281,7 +301,12 @@ export function createPlanMode(pi: ExtensionAPI, directory: string, settingsFile
         state.phase = "off";
         pi.setActiveTools(request.tools);
         persist(ctx);
-        pi.sendUserMessage(implementationPrompt(request.plan));
+        await pi.sendUserMessage(implementationPrompt(request.plan));
+        try {
+          await backup.clearSession(expectedSession, expectedPlan, expectedCwd);
+        } catch (error) {
+          notifyError(ctx, error);
+        }
         return;
       }
     } catch (error) {
@@ -294,26 +319,44 @@ export function createPlanMode(pi: ExtensionAPI, directory: string, settingsFile
 
   pi.registerCommand("plan", {
     description:
-      "Start planning with /plan [prompt]; configure with /plan settings; reopen a ready plan with /plan",
+      "Start planning with /plan [prompt]; configure with /plan settings; exit with /plan exit; reopen a ready plan with /plan",
     getArgumentCompletions: (argumentPrefix) => {
       const prefix = argumentPrefix.trimStart();
-      if (/\s/.test(prefix) || !"settings".startsWith(prefix.toLowerCase())) return null;
-      return [
+      if (/\s/.test(prefix)) return null;
+      const options = [
         {
           value: "settings",
           label: "settings",
           description: "Configure Plan Mode tools, bash whitelist, and models",
         },
+        ...(active()
+          ? [
+              {
+                value: "exit",
+                label: "exit",
+                description: "Leave Plan Mode and restore your original tools and thinking level",
+              },
+            ]
+          : []),
       ];
+      const matches = options.filter(({ value }) => value.startsWith(prefix.toLowerCase()));
+      return matches.length ? matches : null;
     },
 
     handler: async (args, ctx) => {
-      if (compacting) {
+      const isExit = args.trim() === "exit";
+      if (compacting && !isExit) {
         ctx.ui.notify("Wait for plan compaction to finish.", "warning");
         return;
       }
+
       await ctx.waitForIdle();
       if (disposed) return;
+      if (isExit) {
+        exitPlan(ctx);
+        return;
+      }
+
       if (args.trim() === "settings") {
         await configureSettings(pi, ctx, settings, async () => {
           await saveSettings(settingsFile, settings);

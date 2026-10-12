@@ -37,3 +37,55 @@ test("backup is atomic, private, serialized, and scoped to a session", async () 
   expect(await backup.recover("session-a", "/another-project")).toBeUndefined();
   expect(await backup.recover("session-b", "/project")).toBeUndefined();
 });
+
+test("cleanup waits for queued writes and removes the session and matching shared backups", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-plan-backup-cleanup-"));
+  dirs.push(dir);
+  const backup = new PlanBackup(dir);
+  backup.enqueue(
+    { sessionId: "session-a", cwd: "/project", state: state("Approved plan") },
+    () => {},
+  );
+  await backup.clearSession("session-a", "Approved plan", "/project");
+
+  expect(await backup.recover("session-a", "/project")).toBeUndefined();
+  await expect(readFile(join(dir, "PLAN.md"), "utf8")).rejects.toThrow();
+  await expect(readFile(join(dir, "state", "session-a", "PLAN.md"), "utf8")).rejects.toThrow();
+  await expect(
+    readFile(join(dir, "state", "session-a", "recovery.json"), "utf8"),
+  ).rejects.toThrow();
+});
+
+test("cleanup preserves a shared plan that belongs to a different session", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-plan-backup-preserve-"));
+  dirs.push(dir);
+  const backup = new PlanBackup(dir);
+  backup.enqueue(
+    {
+      sessionId: "session-a",
+      cwd: "/project-a",
+      state: state("Other session plan"),
+    },
+    () => {},
+  );
+  await backup.flush();
+
+  await backup.clearSession("session-a", "Approved plan", "/project-a");
+
+  expect(await readFile(join(dir, "PLAN.md"), "utf8")).toBe("Other session plan\n");
+  expect(await backup.recover("session-a", "/project-a")).toBeUndefined();
+});
+
+test("cleanup keeps the plan file when it is also the current-directory export", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-plan-backup-export-"));
+  dirs.push(dir);
+  const backup = new PlanBackup(dir);
+  backup.enqueue({ sessionId: "session-a", cwd: dir, state: state("Exported plan") }, () => {});
+  await backup.flush();
+
+  await backup.clearSession("session-a", "Exported plan", dir);
+
+  expect(await readFile(join(dir, "PLAN.md"), "utf8")).toBe("Exported plan\n");
+  expect(await backup.recover("session-a", dir)).toBeUndefined();
+  await expect(readFile(join(dir, "state", "session-a", "PLAN.md"), "utf8")).rejects.toThrow();
+});
